@@ -1,5 +1,12 @@
 #include "systemcalls.h"
 
+#include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <fcntl.h>
+
 /**
  * @param cmd the command to execute with system()
  * @return true if the command in @param cmd was executed
@@ -17,7 +24,12 @@ bool do_system(const char *cmd)
  *   or false() if it returned a failure
 */
 
-    return true;
+	if (system(cmd) != 0){
+			return false;
+		}
+
+	return true;
+
 }
 
 /**
@@ -47,7 +59,7 @@ bool do_exec(int count, ...)
     command[count] = NULL;
     // this line is to avoid a compile warning before your implementation is complete
     // and may be removed
-    command[count] = command[count];
+    // command[count] = command[count];
 
 /*
  * TODO:
@@ -58,9 +70,24 @@ bool do_exec(int count, ...)
  *   as second argument to the execv() command.
  *
 */
+   va_end(args);
 
-    va_end(args);
-
+	pid_t pid = 0;
+	int status;
+	pid = fork();
+	if (pid == 0) { 				//I am the child
+		execv(command[0],command);
+		return -1;  				//execv failed
+	}
+	if (pid > 0) { 					//I am the parent and child is pid
+		pid = waitpid(pid,&status,0);
+		if (status != 0){
+			return false;
+		}
+	}
+	if (pid < 0) { 				//error failed to fork or to wait
+		return false;
+	}
     return true;
 }
 
@@ -82,7 +109,7 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     command[count] = NULL;
     // this line is to avoid a compile warning before your implementation is complete
     // and may be removed
-    command[count] = command[count];
+    // command[count] = command[count];
 
 
 /*
@@ -92,8 +119,32 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *   The rest of the behaviour is same as do_exec()
  *
 */
-
     va_end(args);
+    
+	int fd = open(outputfile, O_RDWR|O_CREAT, 0666);
 
+	if ( fd == -1 ){
+		return false;
+	}else{
+		pid_t pid = 0;
+		int status;
+		pid = fork();
+		if (pid == 0) { 				//I am the child	
+			if (dup2(fd, 1) < 0) {
+				return false;
+			}
+			execv(command[0],command);
+			return -1; 				//execv failed
+		}
+		if (pid > 0) { 					//I am the parent and child is pid
+			pid = waitpid(pid,&status,0);
+			if (status != 0){
+				return false;
+			}
+		}
+		if (pid < 0) { 				//error failed to fork or to wait
+			return false;
+		}
+	}
     return true;
 }
