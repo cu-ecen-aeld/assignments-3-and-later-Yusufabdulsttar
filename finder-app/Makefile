@@ -1,3 +1,7 @@
+# *********************************
+# Author : Yusuf Abdulsttar
+# *********************************
+
 # the compiler: gcc for C program,or if we use specifec compiler
 CC = $(CROSS_COMPILE)gcc
 

@@ -1,3 +1,7 @@
+# *********************************
+# Author : Yusuf Abdulsttar
+# *********************************
+
 #!/bin/bash
 
 if [ $# -ne 2 ] #The $# variable will tell you the number of input arguments the script was passed.
