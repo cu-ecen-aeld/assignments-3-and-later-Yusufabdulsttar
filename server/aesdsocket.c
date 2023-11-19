@@ -14,6 +14,7 @@
 #include <sys/types.h>
 
 #define buffer_size 1024
+
 void cleanup(int exit_code);
 void sig_handler(int signo);
 
@@ -116,7 +117,8 @@ int main(int argc, char *argv[]) {
         syslog(LOG_INFO, "Accepted connection from %s", client_ip);
 
         // Receive and process data
-        char buffer[buffer_size];
+        //char buffer[buffer_size];
+        char* buffer = (char *)malloc(buffer_size * sizeof(char));
         memset(buffer, 0, buffer_size * sizeof(char));
         int recv_size;
         while ((recv_size = recv(client_sockfd, buffer, buffer_size, 0)) > 0) {
@@ -130,7 +132,7 @@ int main(int argc, char *argv[]) {
             if (memchr(buffer, '\n', buffer_size) != NULL) {
                 // Reset file offset to the beginning of the file
                 lseek(datafd, 0, SEEK_SET);
-                size_t bytes_read = read(datafd, buffer, buffer_size);
+                int bytes_read = read(datafd, buffer, buffer_size);
                 if (bytes_read == -1) {
                     syslog(LOG_ERR, "ERROR: Failed to read from %s file", aesddata_file);
                     cleanup(EXIT_FAILURE);
@@ -142,7 +144,8 @@ int main(int argc, char *argv[]) {
             }
             memset(buffer, 0, buffer_size * sizeof(char));
         }
-
+		free(buffer);
+		
         // Log closed connection
         syslog(LOG_INFO, "Closed connection from %s", client_ip);
         close(client_sockfd);
