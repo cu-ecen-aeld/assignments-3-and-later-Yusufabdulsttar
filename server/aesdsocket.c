@@ -13,7 +13,7 @@
 #include <netinet/in.h>
 #include <sys/types.h>
 
-#define buffer_size 1024
+#define buffer_size 400
 
 void cleanup(int exit_code);
 void sig_handler(int signo);
@@ -149,7 +149,6 @@ int main(int argc, char *argv[]) {
                     bytes_read = read(datafd, buffer, buffer_size); 
                 }
             }
-            memset(buffer, 0, buffer_size * sizeof(char));
         }
 		free(buffer);
 		
