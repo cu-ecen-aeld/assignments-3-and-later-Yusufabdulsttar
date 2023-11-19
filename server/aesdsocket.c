@@ -1,4 +1,3 @@
-
 #include <netdb.h>
 #include <netinet/in.h>
 #include <signal.h>
@@ -42,10 +41,6 @@ void sigHandlerFunction(int signum) {
 
   printf("Caught singal, exiting\n");
 }
-
-
-
-
 
 int main(int argc, char **argv) {
   bool incorrectUsage = false;
@@ -215,6 +210,8 @@ int main(int argc, char **argv) {
       exit(EXIT_FAILURE);
     }
     while ((numread = getline(&readLine, &readLen, g_logFileReadPtr)) != -1) {
+      // printf("num read = %d readLen = %d\n", (int)numread, (int)readLen);
+      // printf("--->%s<---\n", readLine);
       status = send(g_clientSocketFd, readLine, numread, 0);
       if (status < 0) {
         perror("Error sending data to client");
