@@ -62,7 +62,14 @@ int main(int argc, char *argv[]) {
         syslog(LOG_ERR, "Failed to create socket");
         cleanup(EXIT_FAILURE);
     }
-
+    
+    // Allow for reuse of port 9000
+    int enable_reuse = 1; // Set to 1 to enable reuse of port 9000
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &enable_reuse, sizeof(int)) == -1) {
+        syslog(LOG_ERR, "ERROR: Failed to setsockopt");
+        cleanup(EXIT_FAILURE);
+    }
+    
     // Bind to port 9000
     struct addrinfo hints, *res;
     hints.ai_family = AF_INET;
@@ -147,7 +154,7 @@ int main(int argc, char *argv[]) {
 		free(buffer);
 		
         // Log closed connection
-        syslog(LOG_INFO, "Closed connection from %s", client_ip);
+        syslog(LOG_ERR, "Closed connection from %s", client_ip);
         close(client_sockfd);
     }
     return 0;
