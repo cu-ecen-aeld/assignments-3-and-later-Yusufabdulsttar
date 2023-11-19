@@ -1,235 +1,184 @@
-#include <netdb.h>
-#include <netinet/in.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <sys/types.h>
 #include <unistd.h>
-#include <stdbool.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
 #include <syslog.h>
+#include <signal.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/types.h>
 
-#define LOG_FILE "/var/tmp/aesdsocketdata"
+#define buffer_size 1024
 
-FILE *g_logFileWritePtr = NULL;
-FILE *g_logFileReadPtr = NULL;
-int g_serverSocketFd = -1;
-int g_clientSocketFd = -1;
-struct addrinfo g_hints;
-struct addrinfo *g_servInfo = NULL;
-bool g_runAsDaemon = false;
+void cleanup(int exit_code);
+void sig_handler(int signo);
 
-void sigHandlerFunction(int signum) {
-  // Clean up actions on sigint or sigterm
-  if (g_logFileWritePtr)
-    fclose(g_logFileWritePtr);
+int sockfd, client_sockfd, datafd;
 
-  if (g_logFileReadPtr)
-    fclose(g_logFileReadPtr);
+int main(int argc, char *argv[]) {
 
-  unlink(LOG_FILE);
+    if (argc > 1 && strcmp(argv[1], "-d") == 0) {
+		pid_t pid, sid;
 
-  if (g_serverSocketFd)
-    close(g_serverSocketFd);
+		// Fork the process
+		pid = fork();
 
-  if (g_clientSocketFd)
-    close(g_clientSocketFd);
+		// Error with fork
+		if (pid < 0) {
+			syslog(LOG_ERR, "ERROR: Failed to fork");
+			cleanup(EXIT_FAILURE);
+		}
 
-  if (g_servInfo)
-    freeaddrinfo(g_servInfo);
+		// stop parent with SUCCESS
+		if (pid != 0) {
+			exit(EXIT_SUCCESS);
+		}
 
-  printf("Caught singal, exiting\n");
+		// Create a new SID for child process
+		sid = setsid();
+		if (sid < 0) {
+			syslog(LOG_ERR, "ERROR: Failed to setsid");
+			cleanup(EXIT_FAILURE);
+    	}
+
+		// Close out the standard file descriptors
+		close(STDIN_FILENO);
+		close(STDOUT_FILENO);
+		close(STDERR_FILENO);
+    }
+
+    // Set up signal handlers
+    signal(SIGINT, sig_handler);
+    signal(SIGTERM, sig_handler);
+
+    // Create a socket
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd == -1) {
+        syslog(LOG_ERR, "Failed to create socket");
+        cleanup(EXIT_FAILURE);
+    }
+    
+    // Allow for reuse of port 9000
+    int enable_reuse = 1; // Set to 1 to enable reuse of port 9000
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &enable_reuse, sizeof(int)) == -1) {
+        syslog(LOG_ERR, "ERROR: Failed to setsockopt");
+        cleanup(EXIT_FAILURE);
+    }
+    
+    // Bind to port 9000
+    struct addrinfo hints, *res;
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_PASSIVE;
+    
+    if (getaddrinfo(NULL, "9000", &hints, &res) == -1) {
+        syslog(LOG_ERR, "getaddrinfo failed");
+		cleanup(EXIT_FAILURE);
+    }
+
+	// bind socket to address
+	if ((bind(sockfd, res->ai_addr, res->ai_addrlen)) == -1)
+	{
+        syslog(LOG_ERR, "Failed to bind");
+        cleanup(EXIT_FAILURE);
+	}
+
+    // Listen for connections
+    if (listen(sockfd, 5) == -1) {
+        syslog(LOG_ERR, "ERROR: Failed to listen");
+        close(sockfd);
+        return -1;
+    }
+    
+    //free memory allocation
+	freeaddrinfo(res); 
+
+    // Open file for aesdsocketdata
+    char *aesddata_file = "/var/tmp/aesdsocketdata";
+    datafd = open(aesddata_file, O_CREAT | O_RDWR | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    if (datafd == -1){
+        syslog(LOG_ERR, "ERROR: Failed to create file - %s", aesddata_file);
+        exit(EXIT_FAILURE);
+    }
+
+    // Accept connections in a loop
+    struct sockaddr_in client_addr;
+    socklen_t client_addr_len = sizeof(client_addr);
+        
+    while (1) {
+        client_sockfd = accept(sockfd, (struct sockaddr*)&client_addr, &client_addr_len);
+        if (client_sockfd == -1) {
+            syslog(LOG_ERR, "Error accepting connection");
+            // Continue accepting connections
+            continue; 
+        }
+
+        // Log accepted connection
+        char client_ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &(client_addr.sin_addr), client_ip, INET_ADDRSTRLEN);
+        syslog(LOG_INFO, "Accepted connection from %s", client_ip);
+
+        // Receive and process data
+        //char buffer[buffer_size];
+        char* buffer = (char *)malloc(buffer_size * sizeof(char));
+        memset(buffer, 0, buffer_size * sizeof(char));
+        int recv_size;
+        while ((recv_size = recv(client_sockfd, buffer, buffer_size, 0)) > 0) {
+            // Append data to file
+            if (write(datafd, buffer, recv_size) == -1) {
+                syslog(LOG_ERR, "ERROR: Failed to write to %s file", aesddata_file);
+                cleanup(EXIT_FAILURE);
+            }
+
+            // Check for newline to consider the packet complete
+            if (memchr(buffer, '\n', buffer_size) != NULL) {
+                // Reset file offset to the beginning of the file
+                lseek(datafd, 0, SEEK_SET);
+                int bytes_read = read(datafd, buffer, buffer_size);
+                if (bytes_read == -1) {
+                    syslog(LOG_ERR, "ERROR: Failed to read from %s file", aesddata_file);
+                    cleanup(EXIT_FAILURE);
+                }
+                while (bytes_read > 0) {
+                    send(client_sockfd, buffer, bytes_read, 0);
+                    bytes_read = read(datafd, buffer, buffer_size); 
+                }
+            }
+            memset(buffer, 0, buffer_size * sizeof(char));
+        }
+		free(buffer);
+		
+        // Log closed connection
+        syslog(LOG_ERR, "Closed connection from %s", client_ip);
+        close(client_sockfd);
+    }
+    return 0;
 }
 
-int main(int argc, char **argv) {
-  bool incorrectUsage = false;
+void cleanup(int exit_code) {
 
-  // process args
-  if (argc == 2) {
-    if (strcmp(argv[1], "-d") || strcmp(argv[1], "-D")) {
-      g_runAsDaemon = true;
-    } else {
-      incorrectUsage = true;
-    }
-  } else if (argc > 2) {
-    incorrectUsage = true;
-  }
+    // Close open sockets
+    if (sockfd >= 0) close(sockfd);
+    if (client_sockfd >=0) close(client_sockfd);
 
-  if (incorrectUsage) {
-    printf("Usage: %s [-d or -D]\n", argv[0]);
-    printf("\t -d or -D: run as a daemon");
-    exit(EXIT_FAILURE);
-  }
+    // Close file descriptors
+    if (datafd >= 0) close(datafd);
 
-  // Register signal handler
-  struct sigaction act = {0};
-  act.sa_handler = sigHandlerFunction;
-  sigemptyset(&act.sa_mask);
-  act.sa_flags = 0;
-  if (sigaction(SIGTERM, &act, NULL) == -1) {
-    perror("Error registering SIGTERM sigaction");
-    exit(EXIT_FAILURE);
-  }
-  if (sigaction(SIGINT, &act, NULL) == -1) {
-    perror("Error registering SIGINT sigaction");
-    exit(EXIT_FAILURE);
-  }
+    // Delete the file
+    remove("/var/tmp/aesdsocketdata");
 
-  // Setup socket
-  memset(&g_hints, 0, sizeof(g_hints));
-  g_hints.ai_family = AF_UNSPEC;
-  g_hints.ai_socktype = SOCK_STREAM;
-  g_hints.ai_flags = AI_PASSIVE;
+    // Exit
+    exit(exit_code);
+}
 
-  // get address to local host port 9000.
-  int status;
-  if ((status = getaddrinfo(NULL, "9000", &g_hints, &g_servInfo)) != 0) {
-    perror("Error with getaddro ");
-    exit(EXIT_FAILURE);
-  }
-
-  // create socket and bind to it.
-  g_serverSocketFd = socket(g_servInfo->ai_family, g_servInfo->ai_socktype,
-                            g_servInfo->ai_protocol);
-  if (g_serverSocketFd < 0) {
-    perror("Error creating socket");
-    exit(EXIT_FAILURE);
-  }
-
-  // setup socket reuse option
-  const int enable = 1;
-  if (setsockopt(g_serverSocketFd, SOL_SOCKET, SO_REUSEADDR, &enable,
-                 sizeof(int)) < 0) {
-    perror("setsockopt(SO_REUSEADDR) failed");
-    exit(EXIT_FAILURE);
-  }
-
-  // Techinically we need loop thorugh the linked list, but we expect only one
-  // address so using ony once here to bind to socket
-  if (bind(g_serverSocketFd, g_servInfo->ai_addr, g_servInfo->ai_addrlen) !=
-      0) {
-    perror("Error binding to socket");
-    exit(EXIT_FAILURE);
-  }
-
-  if (g_servInfo)
-  {
-    freeaddrinfo(g_servInfo);
-    g_servInfo = NULL;
-  }
-  
-  int pid;
-
-  if(g_runAsDaemon){
-    //fork 
-    pid = fork();
-    if(pid == -1)
-    {
-      perror("Error forking the process");
-      exit(EXIT_FAILURE);
-    }
-    //kill the parent
-    if(pid > 0)
-    {
-      printf("Running as a daemon!");
-      exit(EXIT_SUCCESS);
-    }
-    //Let the child run as daemon
-    if(pid == 0)
-    {
-      printf("Running as a daemon\n");
-      //move on to listening and accepting 
-      //connections
-    }
-  }
-
-  // listen
-  if (listen(g_serverSocketFd, 1)) {
-    perror("Error listening to socket");
-    exit(EXIT_FAILURE);
-  }
-
-  unlink(LOG_FILE);
-
-  // recv
-  for (;;) {
-    // accept connectiono
-    struct sockaddr clientAddress;
-    unsigned int clientAddrLen;
-    clientAddrLen = sizeof(clientAddress);
-    g_clientSocketFd = accept(g_serverSocketFd, &clientAddress, &clientAddrLen);
-    if (g_clientSocketFd < 0) {
-      perror("Error accepting the client socket");
-      exit(EXIT_FAILURE);
-    }
-
-#define NAME_LEN 50
-#define SERVICE_LEN 50
-    char clientName[NAME_LEN], clientService[SERVICE_LEN];
-    status = getnameinfo(&clientAddress, clientAddrLen, clientName, NAME_LEN,
-                         clientService, SERVICE_LEN,
-                         NI_NUMERICHOST | NI_NUMERICSERV);
-    if (status != 0) {
-      perror("Error getting client address name");
-      exit(EXIT_FAILURE);
-    }
-
-    printf("Accepted connection from %s - service %s\n", clientName,
-           clientService);
-
-    // Open Log file
-    g_logFileWritePtr = fopen(LOG_FILE, "a");
-    if (!g_logFileWritePtr) {
-      perror("Error opening log file");
-      exit(EXIT_FAILURE);
-    }
-
-// recv
-#define BUF_SIZE 1024
-    char buf[BUF_SIZE];
-    int rcvd = -1;
-    while ((rcvd = recv(g_clientSocketFd, (void *)buf, sizeof(buf), 0)) > 0) {
-      fwrite(buf, sizeof(char), rcvd, g_logFileWritePtr);
-      fflush(g_logFileWritePtr);
-      // finished with recieving if end of packet
-      if (buf[rcvd - 1] == '\n')
-        break;
-    }
-    fclose(g_logFileWritePtr);
-    g_logFileWritePtr = NULL;
-    // printf("DONE RECEIVING\n");
-
-    // send
-    char *readLine = NULL;
-    size_t readLen = 0;
-    ssize_t numread;
-    g_logFileReadPtr = fopen(LOG_FILE, "r");
-    if (!g_logFileReadPtr) {
-      perror("Error opening file for reading");
-      exit(EXIT_FAILURE);
-    }
-    while ((numread = getline(&readLine, &readLen, g_logFileReadPtr)) != -1) {
-      // printf("num read = %d readLen = %d\n", (int)numread, (int)readLen);
-      // printf("--->%s<---\n", readLine);
-      status = send(g_clientSocketFd, readLine, numread, 0);
-      if (status < 0) {
-        perror("Error sending data to client");
-        exit(EXIT_FAILURE);
-      }
-    }
-    fclose(g_logFileReadPtr);
-    g_logFileReadPtr = NULL;
-    if (readLine) {
-      free(readLine);
-    }
-
-    shutdown(g_clientSocketFd, SHUT_RDWR);
-    close(g_clientSocketFd);
-    g_clientSocketFd = -1;
-
-    printf("Closing connection from %s\n", clientName);
-  }
-
-  return EXIT_SUCCESS;
+void sig_handler(int signo) {
+   if (signo == SIGINT || signo == SIGTERM) {
+       syslog(LOG_INFO, "Caught signal, exiting");
+       cleanup(EXIT_SUCCESS);
+   }
 }
