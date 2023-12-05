@@ -13,12 +13,11 @@ CFLAGS = -g -Wall
 # the build target executable:
 TARGET = aesdsocket
 
-thread = -lpthread
 # Default target
 all: $(TARGET)
 
 $(TARGET):$(TARGET).c
-	$(CC) $(CFLAGS) -o $(TARGET) $(thread) $(TARGET).c
+	$(CC) $(CFLAGS) -o $(TARGET) $(TARGET).c -lpthread
 
 # removes the executable file, as well as object files
 clean:
