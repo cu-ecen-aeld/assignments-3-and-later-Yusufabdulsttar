@@ -13,8 +13,10 @@
 #include <netinet/in.h>
 #include <sys/types.h>
 #include <pthread.h>
+#include <stdbool.h>
 #include <time.h> 
 #include "queue.h"
+
 
 // definations
 #define buffer_size 1024
