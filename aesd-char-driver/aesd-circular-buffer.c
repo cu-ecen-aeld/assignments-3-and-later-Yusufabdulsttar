@@ -2,7 +2,7 @@
  * @file aesd-circular-buffer.c
  * @brief Functions and data related to a circular buffer imlementation
  *
- * @author Dan Walkes
+ * @author Dan Walkes  (Edits by Yusuf Abdulsttar)
  * @date 2020-03-01
  * @copyright Copyright (c) 2020
  *
@@ -32,6 +32,31 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
     /**
     * TODO: implement per description
     */
+    
+    int length = 0;
+    int entry_index = buffer->out_offs;
+    int entries_checked = 0, byte_offset =0;
+
+    while (entries_checked < AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED) {
+        if (buffer->entry[entry_index].buffptr) {
+            length += buffer->entry[entry_index].size;
+
+            if (length > char_offset) {
+                // Calculate the byte offset within the entry
+                byte_offset = char_offset - (length - buffer->entry[entry_index].size);
+
+                // Store the byte offset if requested
+                if (entry_offset_byte_rtn) {
+                    *entry_offset_byte_rtn = byte_offset;
+                }
+
+                return &(buffer->entry[entry_index]);
+            }
+        }
+
+        entry_index = (entry_index + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+        entries_checked++;
+    }
     return NULL;
 }
 
@@ -47,6 +72,17 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const s
     /**
     * TODO: implement per description
     */
+    buffer->entry[buffer->in_offs].buffptr = add_entry->buffptr;
+    buffer->entry[buffer->in_offs].size = add_entry->size;
+    buffer->in_offs = (buffer->in_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+
+    if (buffer->full) {
+        buffer->out_offs = buffer->in_offs;
+    }
+
+    if (!buffer->full && (buffer->in_offs == buffer->out_offs)) {
+        buffer->full = true;
+    }
 }
 
 /**
