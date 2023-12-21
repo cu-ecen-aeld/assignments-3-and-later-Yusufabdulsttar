@@ -17,14 +17,16 @@
 #include <time.h> 
 #include "queue.h"
 
-
 // definations
 #define buffer_size 1024
+#define USE_AESD_CHAR_DEVICE 1
 
 // declrations
 void cleanup(int exit_code);
 void sig_handler(int signo);
+#ifndef USE_AESD_CHAR_DEVICE 
 void *timestamp(void *arg);
+#endif
 void *connection(void *arg);
 
 // data type
