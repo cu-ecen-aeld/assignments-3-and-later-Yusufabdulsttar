@@ -27,8 +27,8 @@ int aesd_open(struct inode *inode, struct file *filp)
     /**
      * TODO: handle open
      */
-     
     struct aesd_dev *dev;
+    
     dev = container_of(inode->i_cdev, struct aesd_dev, cdev);
     filp->private_data = dev;
     
@@ -218,6 +218,7 @@ void aesd_cleanup_module(void)
      * TODO: cleanup AESD specific poritions here as necessary
      */
      
+    struct aesd_buffer_entry *entry; 
     uint8_t index;
     AESD_CIRCULAR_BUFFER_FOREACH(entry, &aesd_device.circular_buffer, index) {  
         kfree(entry->buffptr);

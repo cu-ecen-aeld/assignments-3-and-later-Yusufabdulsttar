@@ -68,18 +68,25 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
 const char* aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
 {
     const char *pointer_to_be_free = NULL;
-    buffer->entry[buffer->in_offs].buffptr = add_entry->buffptr;
-    buffer->entry[buffer->in_offs].size = add_entry->size;
-    buffer->in_offs = (buffer->in_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
 
+   // Check if the buffer is already full
     if (buffer->full) {
-    	pointer_to_be_free = buffer->entry[buffer->in_offs].buffptr;
-        buffer->out_offs = buffer->in_offs;
+        // If buffer is full, overwrite the oldest entry and advance out_offs
+        buffer->out_offs = (buffer->out_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+        pointer_to_be_free = buffer->entry[buffer->in_offs].buffptr;
     }
 
+    // Copy the content of add_entry into the buffer at in_offs
+    buffer->entry[buffer->in_offs] = *add_entry;
+
+    // Update in_offs for the next write operation
+    buffer->in_offs = (buffer->in_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+
+    // Check if the buffer is now full
     if (!buffer->full && (buffer->in_offs == buffer->out_offs)) {
         buffer->full = true;
     }
+
     return pointer_to_be_free;
 }
 
