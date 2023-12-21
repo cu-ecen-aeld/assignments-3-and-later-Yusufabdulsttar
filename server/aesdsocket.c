@@ -28,7 +28,13 @@ void *timestamp(void *arg);
 void *connection(void *arg);
 
 // data type
-int sockfd, client_sockfd, datafd, signal_exit = 0;
+int sockfd, client_sockfd, datafd, signal_exit = 0, datafdns;
+
+#ifdef USE_AESD_CHAR_DEVICE
+static char *aesddata_file = "/dev/aesdchar";
+#else
+static char *aesddata_file = "/var/tmp/aesdsocketdata";
+#endif
 
 typedef struct client_info
 {
@@ -113,21 +119,22 @@ int main(int argc, char *argv[]) {
         close(sockfd);
         return -1;
     }
-
+    
     // Open file for aesdsocketdata
-    char *aesddata_file = "/var/tmp/aesdsocketdata";
     datafd = open(aesddata_file, O_CREAT | O_RDWR | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
     if (datafd == -1){
         syslog(LOG_ERR, "ERROR: Failed to create file - %s", aesddata_file);
         exit(EXIT_FAILURE);
     }
 
+#ifndef USE_AESD_CHAR_DEVICE 
     // Dedicated thread to append timestamps
     pthread_t timestamp_thread;
     if (pthread_create(&timestamp_thread, NULL, timestamp, NULL) != 0) {
         syslog(LOG_ERR, "ERROR: Failed to create timestamp thread!");
         cleanup(EXIT_FAILURE);
     }
+#endif
 
     // Accept connections in a loop
     struct sockaddr_in client_addr;
@@ -203,9 +210,12 @@ void cleanup(int exit_code) {
 
     // Close file descriptors
     if (datafd >= 0) close(datafd);
-
+    if (datafdns >= 0) close(datafdns);
+    
+#ifndef USE_AESD_CHAR_DEVICE 
     // Delete the file
     remove("/var/tmp/aesdsocketdata");
+#endif
 
     // Close syslog
     closelog();
@@ -236,33 +246,46 @@ void *connection(void *arg)
     ssize_t recv_size;
 
     while ((recv_size = recv(client_data.client_sockfd, buffer, buffer_size, 0)) > 0) {
+        
+#ifndef USE_AESD_CHAR_DEVICE 
         // Append data to file ,Lock the mutex before writing
         if (pthread_mutex_lock(&aesddata_file_mutex) != 0) {
             syslog(LOG_ERR, "ERROR: Failed to acquire mutex!");
             cleanup(EXIT_FAILURE);
         }
+#endif
+
         if (write(datafd, buffer, recv_size) == -1) {
             syslog(LOG_ERR, "ERROR: Failed to write to file");
             cleanup(EXIT_FAILURE);
         }
+        
+#ifndef USE_AESD_CHAR_DEVICE 
         // Unlock the mutex after writing to the file
         if (pthread_mutex_unlock(&aesddata_file_mutex) != 0) {
             syslog(LOG_ERR, "ERROR: Failed to release mutex!");
             cleanup(EXIT_FAILURE);
         }
+#endif
 
         // Check for newline to consider the packet complete
         if (memchr(buffer, '\n', buffer_size) != NULL) {
-            // Reset file offset to the beginning of the file
-            lseek(datafd, 0, SEEK_SET);
-            int bytes_read = read(datafd, buffer, buffer_size);
+            // Open file for aesdsocketdata
+            datafdns = open(aesddata_file, O_RDONLY, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+	    if (datafdns == -1){
+		syslog(LOG_ERR, "ERROR: Failed to open file - %s", aesddata_file);
+		exit(EXIT_FAILURE);
+	    }
+	    
+            int bytes_read = read(datafdns, buffer, buffer_size);
+            
             if (bytes_read == -1) {
                 syslog(LOG_ERR, "ERROR: Failed to read from file");
                 cleanup(EXIT_FAILURE);
             }
             while (bytes_read > 0) {
                 send(client_data.client_sockfd, buffer, bytes_read, 0);
-                bytes_read = read(datafd, buffer, buffer_size); 
+                bytes_read = read(datafdns, buffer, buffer_size); 
             }
         }
         memset(buffer, 0, buffer_size * sizeof(char));
@@ -278,6 +301,7 @@ void *connection(void *arg)
     return NULL;
 }
 
+#ifndef USE_AESD_CHAR_DEVICE 
 void *timestamp(void *arg) {
     while (!signal_exit) {
         time_t current_time = time(NULL);
@@ -304,4 +328,5 @@ void *timestamp(void *arg) {
 
     return NULL;
 }
+#endif
 
