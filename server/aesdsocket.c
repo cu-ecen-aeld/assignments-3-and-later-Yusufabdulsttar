@@ -122,12 +122,6 @@ int main(int argc, char *argv[]) {
         return -1;
     }
     
-    // Open file for aesdsocketdata
-    datafd = open(aesddata_file, O_CREAT | O_RDWR | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-    if (datafd == -1){
-        syslog(LOG_ERR, "ERROR: Failed to create file - %s", aesddata_file);
-        exit(EXIT_FAILURE);
-    }
 
 #ifndef USE_AESD_CHAR_DEVICE 
     // Dedicated thread to append timestamps
@@ -237,7 +231,14 @@ void *connection(void *arg)
 {
     struct thread_info_t *thread_info = (struct thread_info_t *)arg;
     client_info_t client_data = thread_info->client_data;
-
+    
+    // Open file for aesdsocketdata
+    datafd = open(aesddata_file, O_CREAT | O_RDWR | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    if (datafd == -1){
+        syslog(LOG_ERR, "ERROR: Failed to create file - %s", aesddata_file);
+        exit(EXIT_FAILURE);
+    }
+    
     // Receive and process data
     char* buffer = (char *)malloc(buffer_size * sizeof(char));
     if (buffer == NULL) {
@@ -285,12 +286,13 @@ void *connection(void *arg)
                 send(client_data.client_sockfd, buffer, bytes_read, 0);
                 bytes_read = read(datafdns, buffer, buffer_size); 
             }
+        if (datafdns >= 0) close(datafdns);
         }
         memset(buffer, 0, buffer_size * sizeof(char));
     }
 
     free(buffer);
-
+    if (datafdns >= 0) close(datafdns);
     // Log closed connection
     syslog(LOG_INFO, "Closed connection from %s", client_data.client_ip);
     close(client_data.client_sockfd);
