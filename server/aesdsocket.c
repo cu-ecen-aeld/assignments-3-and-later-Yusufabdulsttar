@@ -249,26 +249,22 @@ void *connection(void *arg)
 
     while ((recv_size = recv(client_data.client_sockfd, buffer, buffer_size, 0)) > 0) {
         
-#ifndef USE_AESD_CHAR_DEVICE 
         // Append data to file ,Lock the mutex before writing
         if (pthread_mutex_lock(&aesddata_file_mutex) != 0) {
             syslog(LOG_ERR, "ERROR: Failed to acquire mutex!");
             cleanup(EXIT_FAILURE);
         }
-#endif
 
         if (write(datafd, buffer, recv_size) == -1) {
             syslog(LOG_ERR, "ERROR: Failed to write to file");
             cleanup(EXIT_FAILURE);
         }
         
-#ifndef USE_AESD_CHAR_DEVICE 
         // Unlock the mutex after writing to the file
         if (pthread_mutex_unlock(&aesddata_file_mutex) != 0) {
             syslog(LOG_ERR, "ERROR: Failed to release mutex!");
             cleanup(EXIT_FAILURE);
         }
-#endif
 
         // Check for newline to consider the packet complete
         if (memchr(buffer, '\n', buffer_size) != NULL) {
