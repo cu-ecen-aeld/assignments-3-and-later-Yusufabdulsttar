@@ -16,6 +16,7 @@
 #include <linux/fs.h> // file_operations
 #include <linux/mutex.h>
 #include <linux/uaccess.h>
+#include <linux/slab.h>
 #include "aesd-circular-buffer.h"
 
 #define AESD_DEBUG 1  //Remove comment on this line to enable debug
