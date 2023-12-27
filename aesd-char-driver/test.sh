@@ -14,7 +14,7 @@ make
 
 ./aesdchar_load 
 
-../assignment-autotest/test/assignment8/drivertest.sh
+../assignment-autotest/test/assignment9/drivertest.sh
 
 make clean
 

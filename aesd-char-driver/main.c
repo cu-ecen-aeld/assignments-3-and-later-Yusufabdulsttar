@@ -143,16 +143,34 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         
         if (free_buffer) {
             kfree(free_buffer);
+            dev->buffer_size -= dev->circular_buffer.entry[dev->circular_buffer.in_offs].size;
+        } else {
+            dev->buffer_length++;
         }
-
+        
+        dev->buffer_size += dev->entry_cash.size;
         dev->entry_cash.buffptr = NULL;
         dev->entry_cash.size = 0;
     }
+    *f_pos += count;
+    retval = count;
   
 clean:
     mutex_unlock(&dev->lock);
     return retval;
 }
+
+loff_t aesd_llseek(struct file *filp, loff_t off, int whence)
+{
+    struct aesd_dev *dev = filp->private_data; 
+    loff_t retval;
+
+    retval = fixed_size_llseek(filp, off, whence, dev->buffer_size);
+
+    return retval;
+}
+
+
 
 struct file_operations aesd_fops = {
     .owner =    THIS_MODULE,
@@ -160,6 +178,7 @@ struct file_operations aesd_fops = {
     .write =    aesd_write,
     .open =     aesd_open,
     .release =  aesd_release,
+    .llseek =   aesd_llseek,
 };
 
 static int aesd_setup_cdev(struct aesd_dev *dev)
