@@ -18,6 +18,7 @@
 #include <linux/uaccess.h>
 #include <linux/slab.h>
 #include "aesd-circular-buffer.h"
+#include "aesd_ioctl.h"
 
 #define AESD_DEBUG 1  //Remove comment on this line to enable debug
 
