@@ -44,7 +44,6 @@ struct aesd_dev
     struct aesd_buffer_entry entry_cash;
     struct aesd_circular_buffer circular_buffer;
     size_t buffer_size;
-    size_t buffer_length;
     struct mutex lock; 
     struct cdev cdev;     /* Char device structure      */
 };

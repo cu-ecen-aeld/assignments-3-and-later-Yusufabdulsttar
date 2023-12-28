@@ -145,9 +145,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         if (free_buffer) {
             kfree(free_buffer);
             dev->buffer_size -= dev->circular_buffer.entry[dev->circular_buffer.in_offs].size;
-        } else {
-            dev->buffer_length++;
-        }
+        } 
         
         dev->buffer_size += dev->entry_cash.size;
         dev->entry_cash.buffptr = NULL;
