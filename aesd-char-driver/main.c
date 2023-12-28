@@ -197,7 +197,8 @@ static long aesd_adjust_file_offset(struct file *filp, unsigned int write_cmd, u
     }
 	
     // get the file position offset
-    for (int i = 0; i < write_cmd; i++) {
+    unsigned int i;
+    for (i = 0; i < write_cmd; i++) {
         buffer_offset += dev->circular_buffer.entry[i].size;
     }
     
