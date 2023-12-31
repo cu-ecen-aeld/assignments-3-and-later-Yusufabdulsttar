@@ -1,3 +1,11 @@
+**
+ * @file aesdchar.c
+ * @brief Functions and data related to the AESD soket server implementation
+ *
+ * @author Yusuf Abdulsttar
+ *
+ */
+ 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
