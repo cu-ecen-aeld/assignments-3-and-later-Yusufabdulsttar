@@ -1,11 +1,3 @@
-/**
- * @file aesdchar.c
- * @brief Functions and data related to the AESD soket server implementation
- *
- * @author Yusuf Abdulsttar
- *
- */
- 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,12 +17,10 @@
 #include <time.h> 
 #include "queue.h"
 #include "../aesd-char-driver/aesd_ioctl.h"
-#include <errno.h>
 
 // definations
 #define buffer_size 1024
 #define USE_AESD_CHAR_DEVICE 1
-
 // declrations
 void cleanup(int exit_code);
 void sig_handler(int signo);
@@ -40,7 +30,7 @@ void *timestamp(void *arg);
 void *connection(void *arg);
 
 // data type
-int sockfd, client_sockfd, signal_exit = 0;
+int sockfd, client_sockfd, datafd, signal_exit = 0;
 
 #ifdef USE_AESD_CHAR_DEVICE
 static char *aesddata_file = "/dev/aesdchar";
@@ -110,7 +100,14 @@ int main(int argc, char *argv[]) {
         syslog(LOG_ERR, "Failed to create socket");
         cleanup(EXIT_FAILURE);
     }
-
+    
+    // Allow for reuse of port 9000
+    int enable_reuse = 1; // Set to 1 to enable reuse of port 9000
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &enable_reuse, sizeof(int)) == -1) {
+        syslog(LOG_ERR, "ERROR: Failed to setsockopt");
+        cleanup(EXIT_FAILURE);
+    }
+    
     // Bind to port 9000
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
@@ -132,8 +129,8 @@ int main(int argc, char *argv[]) {
         return -1;
     }
     
-#ifndef USE_AESD_CHAR_DEVICE  
 
+#ifndef USE_AESD_CHAR_DEVICE 
     // Dedicated thread to append timestamps
     pthread_t timestamp_thread;
     if (pthread_create(&timestamp_thread, NULL, timestamp, NULL) != 0) {
@@ -153,7 +150,6 @@ int main(int argc, char *argv[]) {
             // Continue accepting connections
             continue;
         }
-        
 
         struct thread_info_t *new_thread = malloc(sizeof(struct thread_info_t));
         if (new_thread == NULL) {
@@ -214,6 +210,10 @@ void cleanup(int exit_code) {
 
     // Close open sockets
     if (sockfd >= 0) close(sockfd);
+
+    // Close file descriptors
+    if (datafd >= 0) close(datafd);
+
     
 #ifndef USE_AESD_CHAR_DEVICE 
     // Delete the file
@@ -234,19 +234,14 @@ void sig_handler(int signo) {
    }
 }
 
-void *connection(void *tp) {
-    struct thread_info_t *thread_info = (struct thread_info_t *)tp;
+void *connection(void *arg)
+{
+    struct thread_info_t *thread_info = (struct thread_info_t *)arg;
     client_info_t client_data = thread_info->client_data;
     
-    size_t buffer_len = 0;
-    ssize_t recv_size;
-    
-    char *Buff_temp = NULL;
-    size_t Buff_temp_len = 0;
-    
     // Open file for aesdsocketdata
-    FILE *file = fopen(aesddata_file, "a+");
-    if (file == NULL) {
+    datafd = open(aesddata_file, O_CREAT | O_RDWR | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    if (datafd == -1){
         syslog(LOG_ERR, "ERROR: Failed to create file - %s", aesddata_file);
         exit(EXIT_FAILURE);
     }
@@ -258,48 +253,31 @@ void *connection(void *tp) {
         cleanup(EXIT_FAILURE);
     }
     memset(buffer, 0, buffer_size * sizeof(char));
+    ssize_t recv_size;
+    bool newline = false;
+    
+   while(!newline){
+        recv_size = recv(client_data.client_sockfd, buffer, buffer_size, 0);
+#ifdef USE_AESD_CHAR_DEVICE 
+	if (strncmp(buffer, "AESDCHAR_IOCSEEKTO:", strlen("AESDCHAR_IOCSEEKTO:")) == 0) {
+	    struct aesd_seekto seek_to;
 
-    while ((recv_size = recv(client_data.client_sockfd, (void*)&buffer[buffer_len], buffer_size - buffer_len, 0)) != 0) {
+	    sscanf(buffer, "AESDCHAR_IOCSEEKTO:%d,%d", &seek_to.write_cmd, &seek_to.write_cmd_offset);
 
-        buffer_len += recv_size;
-
-        // Process all available messages in buffer
-
-        char *line_start = buffer;
-        char *line_end;
-        while ((line_end = (char*)memchr((void*)line_start, '\n', buffer_len - (line_start - buffer)))) {
-
-            *line_end = '\0';
-
-#ifdef USE_AESD_CHAR_DEVICE
-
-            if (strncmp(line_start, "AESDCHAR_IOCSEEKTO:", strlen("AESDCHAR_IOCSEEKTO:")) == 0) {
-
-                struct aesd_seekto seek_to;
-
-                sscanf(line_start, "AESDCHAR_IOCSEEKTO:%d,%d", &seek_to.write_cmd, &seek_to.write_cmd_offset);
-
-                if (ioctl(fileno(file), AESDCHAR_IOCSEEKTO, &seek_to) < 0) {
-		    syslog(LOG_ERR, "ERROR: ioctl failed to write command");
-		    cleanup(EXIT_FAILURE);
-                }
-
-            } else {
-
-                fputs(line_start, file);
-                fputc('\n', file);
-
-                fseek(file, 0, SEEK_SET);
-            }
+	    if (ioctl(datafd, AESDCHAR_IOCSEEKTO, &seek_to) < 0) {
+		syslog(LOG_ERR, "ERROR: ioctl failed to write command");
+		cleanup(EXIT_FAILURE);
+	    }
+	    break;
+	}
 #else
-
         // Append data to file ,Lock the mutex before writing
         if (pthread_mutex_lock(&aesddata_file_mutex) != 0) {
             syslog(LOG_ERR, "ERROR: Failed to acquire mutex!");
             cleanup(EXIT_FAILURE);
         }
         
-        if (write(fileno(file), buffer, recv_size) == -1) {
+        if (write(datafd, buffer, recv_size) == -1) {
             syslog(LOG_ERR, "ERROR: Failed to write to file");
             cleanup(EXIT_FAILURE);
         }
@@ -309,23 +287,35 @@ void *connection(void *tp) {
             syslog(LOG_ERR, "ERROR: Failed to release mutex!");
             cleanup(EXIT_FAILURE);
         }
-        fseek(file, 0, SEEK_SET);
 #endif
 
-            line_start = line_end + 1;
-
-            // Read one line at a time and send back to client
-
-            while ((recv_size = getdelim(&Buff_temp, &Buff_temp_len,'\n', file)) > 0) {
-                send(client_data.client_sockfd, Buff_temp, recv_size, 0);
-            }
+        if (write(datafd, buffer, recv_size) == -1) {
+            syslog(LOG_ERR, "ERROR: Failed to write to file");
+            cleanup(EXIT_FAILURE);
         }
-
+	
+	// Check for newline 
+	if(memchr(buffer, '\n', buffer_size) != NULL){
+            newline = true;
+            lseek(datafd, 0, SEEK_SET);
+            }
     }
+    
+    int bytes_read,bytes_send;
+    
+    while ((bytes_read = read(datafd,buffer,buffer_size)) > 0) {
 
+       bytes_send = send(client_data.client_sockfd,buffer,bytes_read,0);
+        
+       if (bytes_send < 0) {
+          syslog(LOG_ERR, "ERROR: Failed to send");
+          cleanup(EXIT_FAILURE);
+       }
+        memset(buffer, 0, buffer_size * sizeof(char));
+    }
+   		
     free(buffer);
-    free(Buff_temp);
-    fclose(file);
+    if (datafd >= 0) close(datafd);
     
     // Log closed connection
     syslog(LOG_INFO, "Closed connection from %s", client_data.client_ip);
@@ -350,7 +340,7 @@ void *timestamp(void *arg) {
             syslog(LOG_ERR, "ERROR: Failed to acquire mutex!");
             cleanup(EXIT_FAILURE);
         }
-        write(fileno(file), timestamp, strlen(timestamp));
+        write(datafd, timestamp, strlen(timestamp));
         // Unlock the mutex after writing to the file
         if (pthread_mutex_unlock(&aesddata_file_mutex) != 0) {
             syslog(LOG_ERR, "ERROR: Failed to release mutex!");
@@ -363,3 +353,4 @@ void *timestamp(void *arg) {
     return NULL;
 }
 #endif
+
