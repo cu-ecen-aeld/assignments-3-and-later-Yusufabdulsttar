@@ -1,4 +1,4 @@
-**
+/*
  * @file aesdchar.c
  * @brief Functions and data related to the AESD soket server implementation
  *
